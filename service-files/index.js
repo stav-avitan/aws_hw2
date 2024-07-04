@@ -46,9 +46,16 @@ app.post('/restaurants', async (req, res) => {
     };
 
     if (USE_CACHE) {
-        // Students TODO: Implement the logic to add a restaurant
-        res.status(404).send("need to implement");
-        return;
+        try {
+            const cachedRestaurant = await memcachedActions.getRestaurants(restaurant.name);
+            if (cachedRestaurant) {
+                res.status(409).send({ success: false, message: 'Restaurant already exists' });
+                return;
+            }
+        } catch (err) {
+            console.error('Error', err);
+            res.status(500).send("Internal Server Error");
+        }
     }
 
     try {
@@ -60,6 +67,11 @@ app.post('/restaurants', async (req, res) => {
         }
 
         await dbInstance.put(params).promise();
+
+        if (USE_CACHE) {
+            await memcachedActions.addRestaurants(restaurant.name, restaurant);
+        }
+
         res.status(200).send({ success: true });
     } catch (err) {
         console.error('Error', err);
@@ -78,9 +90,22 @@ app.get('/restaurants/:restaurantName', async (req, res) => {
     };
 
     if (USE_CACHE) {
-        // Students TODO: Implement the logic to add a restaurant
-        res.status(404).send("need to implement");
-        return;
+        try {
+            const cachedRestaurant = await memcachedActions.getRestaurants(restaurantName);
+            if (cachedRestaurant.Item) {
+                const data = cachedRestaurant.Item;
+                res.status(200).json( {
+                    name: restaurantName,
+                    cuisine: data.cuisine,
+                    rating: data.rating || 0,
+                    region: data.region
+                });
+                return;
+            }
+        } catch (err) {
+            console.error('Error', err);
+            res.status(500).send("Internal Server Error");
+        }
     }
 
     try {
@@ -97,6 +122,11 @@ app.get('/restaurants/:restaurantName', async (req, res) => {
             rating: data.Item.Rating || 0,
             region: data.Item.GeoRegion
         };
+
+        if (USE_CACHE) {
+            await memcachedActions.addRestaurants(restaurant.name, restaurant);
+        }
+
         res.status(200).send(restaurant);
     } catch (err) {
         console.error('Error', err);
@@ -114,12 +144,6 @@ app.delete('/restaurants/:restaurantName', async (req, res) => {
         }
     };
 
-    if (USE_CACHE) {
-        // Students TODO: Implement the logic to add a restaurant
-        res.status(404).send("need to implement");
-        return;
-    }
-
     try {
         const data = await dbInstance.get(params).promise();
 
@@ -129,6 +153,11 @@ app.delete('/restaurants/:restaurantName', async (req, res) => {
         }
 
         await dbInstance.delete(params).promise();
+
+        if (USE_CACHE) {
+            await memcachedActions.deleteRestaurants(restaurantName);
+        }
+
         res.status(200).send({ success: true });
     } catch (err) {
         console.error('Error', err);
@@ -146,12 +175,6 @@ app.post('/restaurants/rating', async (req, res) => {
             SimpleKey: restaurantName
         }
     };
-
-    if (USE_CACHE) {
-        // Students TODO: Implement the logic to add a restaurant
-        res.status(404).send("need to implement");
-        return;
-    }
 
     try {
         const data = await dbInstance.get(params).promise();
@@ -178,6 +201,16 @@ app.post('/restaurants/rating', async (req, res) => {
         };
 
         await dbInstance.update(updateParams).promise();
+
+        if (USE_CACHE) {
+            await memcachedActions.addRestaurants(restaurantName, {
+                name: restaurantName,
+                cuisine: data.Item.Cuisine,
+                rating: newAverageRating,
+                region: data.Item.GeoRegion
+            });
+        }
+
         res.status(200).send({ success: true });
     } catch (err) {
         console.error('Error', err);
@@ -191,10 +224,19 @@ app.get('/restaurants/cuisine/:cuisine', async (req, res) => {
     limit = Math.min(parseInt(req.query.limit), 100) || 10;
     const minRating = parseFloat(req.query.minRating) || 0;
 
+    const cacheKey = `${cuisine}`;
+
     if (USE_CACHE) {
-        // Students TODO: Implement the logic to add a restaurant
-        res.status(404).send("need to implement");
-        return;
+        try {
+            const cachedRestaurants = await memcachedActions.getRestaurants(cacheKey);
+            if (cachedRestaurants) {
+                res.status(200).send(cachedRestaurants);
+                return;
+            }
+        } catch (err) {
+            console.error('Error', err);
+            res.status(500).send("Internal Server Error");
+        }
     }
 
     const params = {
@@ -218,6 +260,11 @@ app.get('/restaurants/cuisine/:cuisine', async (req, res) => {
             rating: item.Rating,
             region: item.GeoRegion
         }));
+
+        if (USE_CACHE) {
+            await memcachedActions.addRestaurants(cacheKey, restaurants);
+        }
+
         res.status(200).json(restaurants);
     } catch (err) {
         console.error('Error', err);
@@ -230,10 +277,19 @@ app.get('/restaurants/region/:region', async (req, res) => {
     let limit = req.query.limit;
     limit = Math.min(parseInt(req.query.limit), 100) || 10;
 
+    const cacheKey = `${region}`;
+
     if (USE_CACHE) {
-        // Students TODO: Implement the logic to add a restaurant
-        res.status(404).send("need to implement");
-        return;
+        try {
+            const cachedRestaurants = await memcachedActions.getRestaurants(cacheKey);
+            if (cachedRestaurants) {
+                res.status(200).send(cachedRestaurants);
+                return;
+            }
+        } catch (err) {
+            console.error('Error', err);
+            res.status(500).send("Internal Server Error");
+        }
     }
 
     const params = {
@@ -258,6 +314,11 @@ app.get('/restaurants/region/:region', async (req, res) => {
                 region: item.GeoRegion
             };
         });
+
+        if (USE_CACHE) {
+            await memcachedActions.addRestaurants(cacheKey, restaurants);
+        }
+
         res.status(200).json(restaurants);
     } catch (err) {
         console.error('Error', err);
@@ -271,10 +332,19 @@ app.get('/restaurants/region/:region/cuisine/:cuisine', async (req, res) => {
     let limit = req.query.limit;
     limit = Math.min(parseInt(req.query.limit), 100) || 10;
 
+    const cacheKey = `${region}_${cuisine}`;
+
     if (USE_CACHE) {
-        // Students TODO: Implement the logic to add a restaurant
-        res.status(404).send("need to implement");
-        return;
+        try {
+            const cachedRestaurants = await memcachedActions.getRestaurants(cacheKey);
+            if (cachedRestaurants) {
+                res.status(200).send(cachedRestaurants);
+                return;
+            }
+        } catch (err) {
+            console.error('Error', err);
+            res.status(500).send("Internal Server Error");
+        }
     }
 
     const params = {
@@ -300,6 +370,11 @@ app.get('/restaurants/region/:region/cuisine/:cuisine', async (req, res) => {
                 region: item.GeoRegion
             };
         });
+
+        if (USE_CACHE) {
+            await memcachedActions.addRestaurants(cacheKey, restaurants);
+        }
+
         res.status(200).json(restaurants);
     } catch (err) {
         console.error('Error', err);
